@@ -74,20 +74,40 @@ def load_geometry(path, records, characteristics_path=None):
     for row in records:
         if row.get("Superelevation Region") and row.get("Description") in ("Begin Full Super", "End Full Super"):
             critical[row["Superelevation Region"]][row["Description"]] = metres(row["Station"])
-    matches = {}
+    assignments = {}
+    available = {index for index in range(len(curves))}
     for region, dates in critical.items():
         if len(dates) != 2:
             continue
         midpoint = sum(dates.values()) / 2
-        candidates = [curve for curve in curves if curve["PC o SC"] <= midpoint <= curve["PT o CS"]]
-        if len(candidates) == 1:
-            curve = candidates[0]
-            entries = design.get(metres(curve["Entidad"]), [])
-            exact = [entry for entry in entries if abs(entry["Radio"] - curve["Radio (m)"]) <= 0.001]
-            candidates = exact or entries
-            criteria = candidates[0] if candidates and all(entry == candidates[0] for entry in candidates) else {}
-            design_radius = criteria.get("Radio", entries[0]["Radio"] if len(entries) == 1 else None)
-            matches[region] = {**curve, "Radio de la tabla Vd (m)": design_radius, **{key: criteria.get(key) for key in ("Vd", "Bombeo", "P%", "Calzada")}}
+        matches = [i for i, curve in enumerate(curves) if curve["PC o SC"] <= midpoint <= curve["PT o CS"]]
+        if len(matches) == 1 and matches[0] in available:
+            assignments[region] = matches[0]
+            available.remove(matches[0])
+
+    # A shifted 30 m full-super interval can contain a short arc even
+    # when its midpoint falls on the preceding or following spiral.
+    for region, dates in critical.items():
+        if region in assignments or len(dates) != 2:
+            continue
+        start, end = sorted(dates.values())
+        matches = [
+            i for i, curve in enumerate(curves)
+            if max(start, curve["PC o SC"]) < min(end, curve["PT o CS"])
+        ]
+        if len(matches) == 1 and matches[0] in available:
+            assignments[region] = matches[0]
+            available.remove(matches[0])
+
+    matches = {}
+    for region, index in assignments.items():
+        curve = curves[index]
+        entries = design.get(metres(curve["Entidad"]), [])
+        exact = [entry for entry in entries if abs(entry["Radio"] - curve["Radio (m)"]) <= 0.001]
+        candidates = exact or entries
+        criteria = candidates[0] if candidates and all(entry == candidates[0] for entry in candidates) else {}
+        design_radius = criteria.get("Radio", entries[0]["Radio"] if len(entries) == 1 else None)
+        matches[region] = {**curve, "Radio de la tabla Vd (m)": design_radius, **{key: criteria.get(key) for key in ("Vd", "Bombeo", "P%", "Calzada")}}
     return matches
 
 
