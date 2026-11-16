@@ -10,3 +10,4 @@ Para ejecutar en local con rutas de Windows:
 python -m pip install -r requirements.txt
 python -m streamlit run app_peraltes_local.py
 ```
+
