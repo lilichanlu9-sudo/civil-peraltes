@@ -84,7 +84,7 @@ def read_csv(path):
 
 def number(value, station=False):
     if value is None:
-        raise ValueError("Celda vacía")
+        raise ValueError("Celda vac�a")
     value = str(value).strip().replace(",", ".")
     if station:
         value = value.lower().removesuffix("m").strip().replace("+", "")
@@ -149,7 +149,7 @@ def show_excel(st, web_uploads=False):
         st.warning("No hay datos bajo esa fila de encabezados.")
         return
 
-    st.success(f"Datos de peraltes cargados: {path.name} · {len(data)} filas.")
+    st.success(f"Datos de peraltes cargados: {path.name} � {len(data)} filas.")
     geometry = {}
     native_peraltes = path.suffix.lower() == ".csv" or web_uploads
     if native_peraltes:
@@ -157,7 +157,7 @@ def show_excel(st, web_uploads=False):
         try:
             geometry = completed_geometry(path, geometry)
         except (OSError, ValueError, KeyError, TypeError) as error:
-            st.error(f"No se pudieron leer las características guardadas: {error}")
+            st.error(f"No se pudieron leer las caracter�sticas guardadas: {error}")
         if geometry:
             regions = list(dict.fromkeys(row["Superelevation Region"] for row in data if row.get("Superelevation Region")))
             missing = [region for region in regions if geometry.get(region, {}).get("Vd") is None]
@@ -169,34 +169,36 @@ def show_excel(st, web_uploads=False):
     region = None
     if "Superelevation Region" in columns:
         regions = list(dict.fromkeys(row["Superelevation Region"] for row in data if row["Superelevation Region"]))
-        region = st.selectbox("Región de peralte", [None, *regions], format_func=lambda value: "Todas" if value is None else f"Región {value}")
+        region = st.selectbox("Regi�n de peralte", [None, *regions], format_func=lambda value: "Todas" if value is None else f"Regi�n {value}")
         if region is not None:
             data = [row for row in data if row["Superelevation Region"] == region]
 
     station_candidates = [
         name for name in columns
         if name.lower().split(" [col.")[0].strip() in
-        {"station", "start station", "chainage", "progresiva", "estación", "estacion", "progresiva (m)"}
+        {"station", "start station", "chainage", "progresiva", "estaci�n", "estacion", "progresiva (m)"}
     ]
-    station = st.selectbox("Columna de progresiva", columns, index=columns.index(station_candidates[0]) if station_candidates else None)
+    station = "Station" if native_peraltes and "Station" in columns else next(iter(station_candidates), None)
+    if station is None and not native_peraltes:
+        station = st.selectbox("Columna de progresiva", columns, index=None)
     slope_candidates = [
         name for name in columns
         if any(term in name.lower() for term in ("outside lane", "carril exterior", "pendiente (%)"))
         and "rate of change" not in name.lower()
     ]
-    slopes = st.multiselect("Columnas de pendiente por carril", columns, default=slope_candidates)
+    slopes = [name for name in slope_candidates if name != station]
     with st.expander("Vista previa de la hoja"):
         st.dataframe([{key: "" if value is None else str(value) for key, value in row.items()} for row in data[:25]], hide_index=True)
-    if station is None or not slopes:
-        st.info("Selecciona una columna de progresiva y al menos una de pendiente.")
+    if not slopes:
+        st.warning("No se detectaron columnas de pendiente de carril en el archivo.")
         return
-    if station in slopes:
-        st.error("Selecciona columnas distintas para la progresiva y la pendiente.")
+    if station is None:
+        st.warning("No se detect� la columna de progresiva en el archivo.")
         return
 
     points, skipped = profile_points(data, station, slopes)
     if not points:
-        st.warning("No se encontraron pares válidos de progresiva y pendiente en las columnas seleccionadas.")
+        st.warning("No se encontraron pares v�lidos de progresiva y pendiente en las columnas del diagrama.")
         return
     points.sort(key=lambda point: point["Progresiva (m)"])
     audit = st.session_state.get("dg_batch")
@@ -205,9 +207,9 @@ def show_excel(st, web_uploads=False):
         exported, changes, pending = export_preview(original_rows, audit[1], geometry, st.session_state.get("apply_reverse_links", False))
         applied = [
             change for change in changes
-            if change["En el CSV"] == "Aplicado" and (region is None or change["Región"] == region)
+            if change["En el CSV"] == "Aplicado" and (region is None or change["Regi�n"] == region)
         ]
-        st.caption("Usa la rueda sobre cada gráfica para acercar o alejar. Arrastra para desplazarte y haz doble clic para restablecer la vista.")
+        st.caption("Usa la rueda sobre cada gr�fica para acercar o alejar. Arrastra para desplazarte y haz doble clic para restablecer la vista.")
         st.write(f"{len(applied)} estaciones corregidas en esta vista.")
         if applied:
             with st.expander("Ver cambios de progresiva y pendiente"):
@@ -219,7 +221,7 @@ def show_excel(st, web_uploads=False):
             key = row["Superelevation Region"]
             if region is not None and key != region:
                 continue
-            status = "Pendiente · perfil original" if key in pending else "Verificada · perfil de salida"
+            status = "Pendiente � perfil original" if key in pending else "Verificada � perfil de salida"
             if not sections or sections[-1][0] != status:
                 sections.append((status, [previous] if previous is not None else []))
             sections[-1][1].append(row)
@@ -232,10 +234,10 @@ def show_excel(st, web_uploads=False):
             [min(row[key] for row in all_points), max(row[key] for row in all_points)]
             for key in ("Progresiva (m)", "Pendiente (%)")
         ]
-        for title, series in (("Diagrama original", points), ("Diagrama de salida · verificadas y pendientes", corrected)):
+        for title, series in (("Diagrama original", points), ("Diagrama de salida � verificadas y pendientes", corrected)):
             st.subheader(title)
             if title != "Diagrama original":
-                st.caption("Verde: perfil verificado. Rojo: región pendiente, con las progresivas y pendientes originales.")
+                st.caption("Verde: perfil verificado. Rojo: regi�n pendiente, con las progresivas y pendientes originales.")
             chart = alt.Chart(alt.Data(values=series)).mark_line().encode(
                 x=alt.X("Progresiva (m):Q", scale=alt.Scale(domain=domains[0], zero=False)),
                 y=alt.Y("Pendiente (%):Q", scale=alt.Scale(domain=domains[1], zero=False)),
@@ -246,7 +248,7 @@ def show_excel(st, web_uploads=False):
             else:
                 chart = chart.encode(
                     color=alt.Color("Estado:N", scale=alt.Scale(
-                        domain=["Verificada · perfil de salida", "Pendiente · perfil original"],
+                        domain=["Verificada � perfil de salida", "Pendiente � perfil original"],
                         range=["#087443", "#c32637"],
                     )),
                     strokeDash=alt.StrokeDash("Carril:N"),
@@ -257,14 +259,14 @@ def show_excel(st, web_uploads=False):
                 position = "Progresiva original" if title == "Diagrama original" else "Progresiva propuesta"
                 markers = [
                     {"Progresiva (m)": number(change[position], station=True),
-                     "Estación crítica": change["Estación crítica"], "Región": str(change["Región"])}
+                     "Estaci�n cr�tica": change["Estaci�n cr�tica"], "Regi�n": str(change["Regi�n"])}
                     for change in applied if change["Progresiva original"] != change["Progresiva propuesta"]
                 ]
                 lines = alt.Chart(alt.Data(values=markers)).mark_rule(
                     color="#64748b", strokeDash=[4, 4], opacity=0.65
                 ).encode(
                     x=alt.X("Progresiva (m):Q", scale=alt.Scale(domain=domains[0], zero=False)),
-                    tooltip=["Región:N", "Estación crítica:N", "Progresiva (m):Q"],
+                    tooltip=["Regi�n:N", "Estaci�n cr�tica:N", "Progresiva (m):Q"],
                 )
                 chart = chart + lines
             zoom = alt.selection_interval(
@@ -277,8 +279,8 @@ def show_excel(st, web_uploads=False):
         st.subheader("Diagrama original")
         st.line_chart(points, x="Progresiva (m)", y="Pendiente (%)", color="Carril")
         if native_peraltes:
-            st.info("Pulsa Revisar y corregir todo para mostrar la comparación.")
-    st.caption(f"{len(points)} puntos trazados. Filas sin datos utilizables: {skipped}. Los valores numéricos sin formato de porcentaje se leen como puntos porcentuales.")
+            st.info("Pulsa Revisar y corregir todo para mostrar la comparaci�n.")
+    st.caption(f"{len(points)} puntos trazados. Filas sin datos utilizables: {skipped}. Los valores num�ricos sin formato de porcentaje se leen como puntos porcentuales.")
     st.dataframe(points, hide_index=True)
 
 
