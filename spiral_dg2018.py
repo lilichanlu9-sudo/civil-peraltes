@@ -61,6 +61,10 @@ def spiral_positions(curve, required, slopes, alignment_start, alignment_end, co
 
 
 
+def circular_tangent_fraction(bank):
+    return Decimal("0.5") if bank < Decimal("4.5") else Decimal("0.7") if bank <= 7 else Decimal("0.8")
+
+
 def circular_positions(curve, required, slopes, speed, alignment_start, alignment_end):
     """Place a circular curve's linear transitions relative to PC and PT."""
     pc, pt = (Decimal(str(curve[key])) for key in ("PC o SC", "PT o CS"))
@@ -68,7 +72,7 @@ def circular_positions(curve, required, slopes, speed, alignment_start, alignmen
     bank = slopes[4][exterior]
     if bank <= 0 or slopes[4] != slopes[5]:
         return [], "el perfil no conserva una pendiente constante en peralte completo"
-    fraction = Decimal("0.5") if bank < Decimal("4.5") else Decimal("0.7") if bank <= 7 else Decimal("0.8")
+    fraction = circular_tangent_fraction(bank)
     pc_slope = fraction * bank
 
     ramps = (slopes[1:5], list(reversed(slopes[5:9])))

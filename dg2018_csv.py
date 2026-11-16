@@ -5,7 +5,7 @@ from io import StringIO
 import re
 from curve_review import show_corrected_gallery, show_recommendations
 from spiral_dg2018 import circular_positions, spiral_positions
-from reverse_links import merge_reverse_links, show_reverse_links
+from reverse_links import merge_reverse_links, reverse_links, show_reverse_links
 
 REGION = "Superelevation Region"
 STATION = "Station"
@@ -238,7 +238,8 @@ def show_batch(st, columns, records, geometry):
         left = b.number_input("Distancia de respaldo al borde izquierdo (m)", min_value=0.01, value=common_width) if fallback_width else None
         right = c.number_input("Distancia de respaldo al borde derecho (m)", min_value=0.01, value=common_width) if fallback_width else None
         third = st.checkbox("Carretera de tercera clase", key="batch_third_class")
-        submitted = st.form_submit_button("Revisar y corregir todo", type="primary")
+        st.info("Ajusta las progresivas de entrada y salida según el tipo de curva. Comprueba la longitud de peralte completo, la inclinación de los bordes y los solapamientos.")
+        submitted = st.form_submit_button("① Revisar y corregir todo", type="primary")
     completed = st.session_state.pop("recalculate_completed", False)
     if completed:
         st.success("Características completadas guardadas. Revisión recalculada con los datos guardados.")
@@ -303,9 +304,10 @@ def show_curve_summary(st, records, selected_region, linked_geometry):
     second_applied = set()
     if audit and audit[0] == records and audit[2] == linked_geometry:
         _, changes, blocked = export_preview(
-            records, audit[1], linked_geometry, st.session_state.get("apply_reverse_links", False)
+            records, audit[1], linked_geometry, st.session_state.get("apply_reverse_links", False),
+            st.session_state.get("apply_fourth_correction", False)
         )
-        second_applied = {row["Región"] for row in changes if row["En el CSV"] == "Aplicado" and row["Corrección"].startswith("Segunda")}
+        second_applied = {row["Región"] for row in changes if row["En el CSV"] == "Aplicado" and row["Corrección"].startswith(("Segunda", "Cuarta"))}
     summary = []
     for region in regions:
         linked = linked_geometry.get(region, {})
@@ -341,13 +343,18 @@ def show_curve_summary(st, records, selected_region, linked_geometry):
     if audit and audit[0] == records and audit[2] == linked_geometry:
         show_export_report(st, records, audit[1], linked_geometry)
 
-def export_preview(records, result, geometry=None, second=False):
+def export_preview(records, result, geometry=None, second=False, fourth=False):
 
     _, blocks, _, _, proposed = result
     pending = {region for message in blocks for region in blocked_regions(message)}
     linked = set()
-    if second and geometry:
-        proposed, linked = merge_reverse_links(records, proposed, geometry, pending, station_text)
+    fourth_only = set()
+    if (second or fourth) and geometry:
+        if fourth:
+            _, standard_links = merge_reverse_links(records, proposed, geometry, pending, station_text)
+        proposed, linked = merge_reverse_links(records, proposed, geometry, pending, station_text, fourth)
+        if fourth:
+            fourth_only = linked - standard_links
         pending.difference_update(linked)
     original_bounds = {}
     for row in records:
@@ -404,7 +411,8 @@ def export_preview(records, result, geometry=None, second=False):
                 "Izquierdo original": old[LEFT], "Izquierdo corregido": new[LEFT],
                 "Derecho original": old[RIGHT], "Derecho corregido": new[RIGHT],
                 "En el CSV": "Aplicado" if applied else "Pendiente · conserva original",
-                "Corrección": "Segunda · enlace conjunto" if region in linked else "Primera",
+                "Corrección": ("Cuarta · enlace con tangente corta" if region in fourth_only else
+                               "Segunda · enlace conjunto" if region in linked else "Primera"),
             })
 
     return exported, changes, pending
@@ -413,7 +421,8 @@ def export_preview(records, result, geometry=None, second=False):
 def show_export_report(st, records, result, geometry):
     base_pending = export_preview(records, result)[2]
     second = st.session_state.get("apply_reverse_links", False)
-    exported, changes, pending = export_preview(records, result, geometry, second)
+    fourth = st.session_state.get("apply_fourth_correction", False)
+    exported, changes, pending = export_preview(records, result, geometry, second, fourth)
     blocks = result[1]
     st.subheader("Reporte de cambios y exportación")
     applied_count = sum(row["En el CSV"] == "Aplicado" for row in changes)
@@ -453,16 +462,22 @@ def show_export_report(st, records, result, geometry):
     if second and 2 not in history:
         stage_two = export_preview(records, st.session_state["first_correction_result"], geometry, True)
         history[2] = stage_two[0], stage_two[2]
+    if fourth:
+        history[4] = exported, pending
+    else:
+        history.pop(4, None)
     show_corrected_gallery(st, history, geometry)
     show_reverse_links(st, records, result[4], geometry, base_pending,
                        lambda enabled: len(export_preview(records, result, geometry, enabled)[2]))
     show_third_adjustment(st, records, geometry, result, pending, second)
+    if 3 in history:
+        show_fourth_adjustment(st, records, geometry, result, second, pending)
 
 def show_third_adjustment(st, records, geometry, result, pending, second):
     if not pending or "batch_inputs" not in st.session_state:
         return
     st.subheader("Tercera corrección · probar aplanamientos más cortos")
-    st.caption(
+    st.info(
         "Se recalcula el aplanamiento de las curvas con espirales hasta su mínimo por inclinación. "
         "Los cambios que requieren rediseñar radios o espirales se mantienen como recomendaciones."
     )
@@ -480,7 +495,7 @@ def show_third_adjustment(st, records, geometry, result, pending, second):
         [(), *groups],
         format_func=lambda group: "Todas las regiones pendientes" if not group else "Regiones " + " y ".join(group),
     )
-    if not st.button("Aplicar tercera corrección"):
+    if not st.button("③ Aplicar tercera corrección"):
         return
     target = set(selection) if selection else set(pending)
     # Try the same change on each adjacent counterpart named in a conflict.
@@ -520,7 +535,23 @@ def show_third_adjustment(st, records, geometry, result, pending, second):
     )
     st.rerun()
 
+def show_fourth_adjustment(st, records, geometry, result, second, pending):
+    st.subheader("Cuarta corrección · enlaces con tangente corta y curva circular")
+    st.info("Busca el punto de pendiente cero en la tangente. Cuando la curva siguiente es circular, conserva también el peralte previsto en PC.")
+    def notify():
+        enabled = st.session_state["apply_fourth_correction"]
+        remaining = export_preview(records, result, geometry, second, enabled)[2]
+        st.session_state["adjustment_notice"] = f"Cuarta corrección {'activada' if enabled else 'desactivada'}. Quedan {len(remaining)} regiones pendientes."
 
-
+    if not st.toggle("④ Aplicar cuarta corrección", key="apply_fourth_correction", on_change=notify):
+        return
+    baseline = export_preview(records, result)[2]
+    attempts, _ = reverse_links(records, result[4], geometry, baseline, short_tangents=True)
+    candidates = [row for row in attempts if row["Tangente entre clotoides (m)"] > 0]
+    if candidates:
+        st.dataframe(candidates, hide_index=True)
+    if pending:
+        st.warning("Siguen pendientes las regiones " + ", ".join(sorted(pending, key=int)) +
+                   ". Revisa el desarrollo disponible o la geometría antes de importar el alineamiento completo.")
 
 
