@@ -287,12 +287,10 @@ def show_batch(st, columns, records, geometry):
             for lane, side in ((LEFT, "Izquierdo"), (RIGHT, "Derecho"))
         ]
         st.line_chart(chart, x="Progresiva (m)", y="Pendiente (%)", color="Serie")
-def show_curve_summary(st, path, selected_region, linked_geometry):
+def show_curve_summary(st, records, selected_region, linked_geometry):
     from collections import Counter
 
-    from excel_peraltes import read_csv
 
-    _, records = read_csv(path)
     regions = list(dict.fromkeys(row[REGION] for row in records if row.get(REGION)))
     if not regions:
         return
@@ -521,6 +519,7 @@ def show_third_adjustment(st, records, geometry, result, pending, second):
         f"Quedan {len(best_pending)} pendientes."
     )
     st.rerun()
+
 
 
 

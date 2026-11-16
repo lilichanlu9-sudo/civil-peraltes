@@ -3,7 +3,7 @@ import altair as alt
 from pathlib import Path
 
 from openpyxl import load_workbook
-from dg2018_csv import export_preview, show_batch
+from dg2018_csv import HEADER, export_preview, show_batch
 from civil_geometry import show_geometry
 from completed_curves import completed_geometry, show_completion
 
@@ -33,6 +33,37 @@ def read_sheet(path, sheet_name=None, header_row=1):
             if any(value is not None for value in record.values()):
                 data.append(record)
         return list(columns.values()), data
+    finally:
+        workbook.close()
+
+
+def read_peraltes_workbook(st, path):
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        names = [
+            sheet.title for sheet in workbook
+            if tuple(next(sheet.values, ())[:len(HEADER)]) == HEADER
+        ]
+        if not names:
+            raise ValueError("El Excel debe contener una hoja con las 12 columnas del CSV de peraltes de Civil 3D.")
+        default = next((i for i, name in enumerate(names) if name == "Peraltes_14_11"), 0)
+        name = st.selectbox("Hoja de peraltes", names, index=default) if len(names) > 1 else names[0]
+        st.caption(f"Hoja de peraltes: {name}")
+        data = []
+        for cells in workbook[name].iter_rows(min_row=2, max_col=len(HEADER)):
+            if cells[1].value is None:
+                continue
+            values = []
+            for index, cell in enumerate(cells):
+                value = cell.value
+                if index >= 4 and value is not None:
+                    percentage = number(value)
+                    if isinstance(value, (int, float)) and "%" in cell.number_format:
+                        percentage *= 100
+                    value = f"{percentage:.6g}%"
+                values.append("" if value is None else str(value))
+            data.append(dict(zip(HEADER, values)))
+        return list(HEADER), data
     finally:
         workbook.close()
 
@@ -104,6 +135,8 @@ def show_excel(st, web_uploads=False):
     try:
         if path.suffix.lower() == ".csv":
             columns, data = read_csv(path)
+        elif web_uploads:
+            columns, data = read_peraltes_workbook(st, path)
         else:
             sheets = read_sheet(path)
             sheet = st.selectbox("Hoja", sheets)
@@ -118,7 +151,8 @@ def show_excel(st, web_uploads=False):
 
     st.success(f"Datos de peraltes cargados: {path.name} · {len(data)} filas.")
     geometry = {}
-    if path.suffix.lower() == ".csv":
+    native_peraltes = path.suffix.lower() == ".csv" or web_uploads
+    if native_peraltes:
         geometry = show_geometry(st, data, path, uploaded[1:] if uploaded else None)
         try:
             geometry = completed_geometry(path, geometry)
@@ -167,7 +201,7 @@ def show_excel(st, web_uploads=False):
     points.sort(key=lambda point: point["Progresiva (m)"])
     audit = st.session_state.get("dg_batch")
     current = audit and audit[0] == original_rows and audit[2] == geometry
-    if path.suffix.lower() == ".csv" and current:
+    if native_peraltes and current:
         exported, changes, pending = export_preview(original_rows, audit[1], geometry, st.session_state.get("apply_reverse_links", False))
         applied = [
             change for change in changes
@@ -242,7 +276,7 @@ def show_excel(st, web_uploads=False):
     else:
         st.subheader("Diagrama original")
         st.line_chart(points, x="Progresiva (m)", y="Pendiente (%)", color="Carril")
-        if path.suffix.lower() == ".csv":
+        if native_peraltes:
             st.info("Pulsa Revisar y corregir todo para mostrar la comparación.")
     st.caption(f"{len(points)} puntos trazados. Filas sin datos utilizables: {skipped}. Los valores numéricos sin formato de porcentaje se leen como puntos porcentuales.")
     st.dataframe(points, hide_index=True)
@@ -250,13 +284,14 @@ def show_excel(st, web_uploads=False):
 
 
 
-    if path.suffix.lower() == ".csv":
+    if native_peraltes:
         from dg2018_csv import show_curve_summary
 
-        show_curve_summary(st, path, region, geometry)
+        show_curve_summary(st, original_rows, region, geometry)
         if geometry and show_completion(st, path, geometry):
             st.session_state["recalculate_completed"] = True
             st.rerun()
+
 
 
 

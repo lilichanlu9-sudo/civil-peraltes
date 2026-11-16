@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 
 def upload_inputs(st):
-    peraltes = st.file_uploader("Peraltes de Civil 3D", type=["csv"])
+    peraltes = st.file_uploader("Peraltes de Civil 3D", type=["csv", "xlsx", "xlsm"])
     geometry = st.file_uploader("Diseño geométrico", type=["xlsx", "xlsm"])
     characteristics = st.file_uploader("Características de la carretera", type=["xlsx", "xlsm"])
     if not all((peraltes, geometry, characteristics)):
@@ -26,4 +26,5 @@ def upload_inputs(st):
     if previous:
         previous[1].cleanup()
     return paths
+
 
